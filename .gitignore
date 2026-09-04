@@ -12,6 +12,9 @@ environment_files/
 recordings/
 logs.log
 
+# Generated procedural game files (see procedural/generate.py)
+procedural_games/
+
 # Trained model checkpoints (see model/training/train.py)
 checkpoints/
 *.pt

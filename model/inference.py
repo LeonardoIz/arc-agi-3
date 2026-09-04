@@ -13,7 +13,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import torch
 from arcengine import FrameData, GameAction
@@ -75,6 +75,24 @@ def config_from_checkpoint(payload: dict[str, Any]) -> ModelConfig:
 
 
 # ── Agent-facing policy wrapper ─────────────────────────────────────────
+
+
+@runtime_checkable
+class Policy(Protocol):
+    """The interface `agent/my_agent.py` programs against, so the backend
+    behind it (the random baseline, `ModelPolicy`, or anything else) is
+    swappable without touching agent code.
+
+    `reset()` clears whatever episode-scoped state a policy holds — it's a
+    no-op today (`ModelPolicy` carries no memory across calls yet), but the
+    call site in `MyAgent.__init__` is here so that once a sequential model
+    starts accumulating memory across a game, wiring it in doesn't require
+    touching the agent again.
+    """
+
+    def act(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction: ...
+
+    def reset(self) -> None: ...
 
 
 class ModelPolicy:
@@ -140,3 +158,9 @@ class ModelPolicy:
         )
         output = self.model(obs)
         return decode_action(output, self.inference_config)
+
+    def reset(self) -> None:
+        """Clear episode-scoped state. No-op until the network carries
+        memory across an episode (see `docs/design.md` §4.4) — kept here so
+        `Policy` has one call site in the agent regardless of backend.
+        """

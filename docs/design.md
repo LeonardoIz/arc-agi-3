@@ -234,20 +234,60 @@ se programa: **tiene que emerger del entrenamiento**.
 
 | Módulo | Estado |
 |---|---|
-| `model/config.py` | Sobrevive; hay que agregar los parámetros de slots y de longitud de contexto. |
-| `model/adapters.py` | Sobrevive. Sigue siendo la única frontera con `arcengine`. Se le quita cualquier tentación de segmentar (C10). |
-| `model/inference.py` | Sobrevive con cambios: extraer una interfaz `Policy` y agregarle `reset()`. |
-| `model/data.py` | Sobrevive. |
-| `model/network.py` | **Se rehace.** Hoy es una CNN sobre un frame único con policy head y value head. Necesita ser encoder de slots + modelo secuencial sobre el episodio. La `ValueHead` queda solo si el método de entrenamiento la necesita (actor-critic); con C9 no hay búsqueda que la use. |
-| `agent/my_agent.py` | Se adelgaza. Hay que sacar el fork por `game_id` de LS20 (viola C2 y de todos modos da 0 en el set oculto). |
+| `model/config.py` | **Hecho.** Parámetros de slots y del transformer agregados. |
+| `model/adapters.py` | **Hecho.** Sigue siendo la única frontera con `arcengine`; construye la `Observation` sobre el episodio completo (no una ventana fija). |
+| `model/inference.py` | **Hecho.** `Policy` extraído como interfaz (`act` + `reset()`); `ModelPolicy.reset()` es no-op hasta que el modelo necesite limpiar estado propio. |
+| `model/data.py` | Sobrevive sin cambios. |
+| `model/network.py` | **Hecho.** Encoder de slots (Slot Attention) + transformer causal con RoPE sobre el episodio. Sin `ValueHead`: el método de entrenamiento (§5.2) es behavior cloning puro, nada consume un value estimate. Ver el docstring del módulo para el detalle de cada pieza. |
+| `agent/my_agent.py` | **Hecho.** Se sacó el fork por `game_id` de LS20 (violaba C2). También filtra el fallback aleatorio por `available_actions` (ver hallazgo abajo) y parchea un bug del framework vendorizado. |
+| `model/train.py` | **Hecho para el entregable de esta fase.** `policy_loss` (behavior cloning, cross-entropy enmascarada) y el loop de `main()` implementados. Entrena de a un episodio grabado por paso — sin batching entre episodios todavía (Fase 3). |
 
-### 4.4 Problema técnico abierto: la longitud del episodio
+**Entregable de Fase 2 medido:** el modelo sobreajusta un episodio grabado de
+`ls20` (80 pasos, baseline aleatorio) — loss cae de 1.50 a 0.0001 en 500
+pasos, y en modo determinista reproduce el 100% de las acciones de la
+trayectoria memorizada. Arquitectura confirmada entrenable de punta a punta.
 
-Con baselines de hasta 1843 acciones por juego (wa30), y K slots por paso, un
-transformer con atención completa sobre el episodio entero es caro. Opciones
-a evaluar: estado recurrente (GRU / SSM tipo Mamba), ventana deslizante con
-tokens de resumen, o compresión aprendida del historial. **No está decidido**
-y es una de las primeras cosas a resolver en la fase de arquitectura.
+**Hallazgo:** `agents.agent.Agent._convert_raw_frame_data` (framework
+vendorizado) descarta `action_input` al construir el `FrameData` que ve el
+agente, aunque `arcengine` sí lo rellena — sin este dato, `model/adapters.py`
+no puede saber qué acción produjo cada frame (todo se ve como "inicio de
+episodio"), y toda grabación queda con ese hueco. Parcheado en tiempo de
+import desde `agent/my_agent.py` (no en `vendor/`, que `make setup`
+regenera y que ni siquiera existe en Kaggle) — ver el docstring de
+`_patch_frame_data_action_input` ahí.
+
+**Hallazgo:** el fallback aleatorio de `my_agent.py` elegía entre las 7
+acciones sin filtrar por `available_actions`, a diferencia de la red (que sí
+enmascara). Una trayectoria grabada con ese fallback contiene acciones que
+el juego declaró ilegales en ese paso, y entrenar contra ellas pide
+log-verosimilitud de una clase enmascarada a `-inf` → loss infinita. Corregido
+en el fallback (ahora filtra por `available_actions`, igual que la red) y
+además `build_training_example` descarta defensivamente cualquier target
+ilegal que se cuele por otra vía.
+
+### 4.4 La longitud del episodio — resuelto
+
+Con baselines de hasta 1843 acciones por juego (wa30), atención completa
+sobre el episodio entero es cara. Se evaluaron tres opciones: estado
+recurrente (GRU), SSM tipo Mamba, y transformer causal con atención
+completa. Se descartó GRU (capacidad de memoria más limitada en tareas de
+contexto largo) y Mamba (dependencia de kernels CUDA específicos, riesgo de
+fricción de instalación ya visto una vez con Blackwell/WSL, y su ventaja
+frente a atención completa es de costo — no de calidad).
+
+**Decisión: transformer causal con atención completa y RoPE** (sin
+ventaneo). Es también la arquitectura que usa Algorithm Distillation en su
+formulación original (Laskin et al.), el método de entrenamiento ya elegido
+en §5.2. Justificado porque, en este proyecto, ni el tiempo de entrenamiento
+ni la VRAM en inferencia son un factor limitante (si la GPU actual — RTX
+5060, 8 GB — se vuelve el cuello de botella, la vía de escape es upgradear
+hardware, no recortar arquitectura). RoPE en vez de posiciones absolutas
+aprendidas porque no fija una longitud máxima de contexto de antemano.
+
+Sin KV-cache por ahora: cada paso de inferencia recalcula el forward pass
+sobre el episodio completo hasta ese punto — O(T) trabajo redundante por
+paso, aceptable mientras el objetivo sea corrección antes que velocidad. Es
+una optimización aislada en `model/network.py` si hace falta después.
 
 ---
 
@@ -299,10 +339,9 @@ perder tiempo. El Makefile ahora usa `TMPDIR` en disco real y fija
 `TORCH_INDEX` a cu129 (`make setup TORCH_INDEX=.../cpu` para máquinas sin
 GPU).
 
-**Pendiente:** el repo vive en `/mnt/c`, al que WSL accede por drvfs, más
-lento que ext4 nativo. Plan: clonar en `~/arc-agi-3` dentro de WSL. Hay que
-copiar a mano `.kaggle/access_token` (gitignoreado) y `environment_files/`
-se re-descarga sola en el primer `make play-local`.
+**Hecho:** el repo se migró a `~/arc-agi-3` dentro de WSL (ext4 nativo, no
+`/mnt/c` vía drvfs). `.kaggle/access_token` copiado a mano;
+`environment_files/` se re-descargó sola en el primer `make play-local`.
 
 ---
 
@@ -310,18 +349,32 @@ se re-descarga sola en el primer `make play-local`.
 
 Cada fase tiene que terminar en un número medido, no en una sensación.
 
-**Fase 0 — Instrumentación.** Evaluador offline que reproduzca el score
-oficial por nivel (acciones usadas vs. baseline) reutilizando la fórmula de
-`arc_agi.scorecard`. Refactor de `Policy` para backends intercambiables.
-*Sin esto todo lo demás es fe ciega.* Entregable: el score real del baseline
-aleatorio actual.
+**Fase 0 — Instrumentación. ✅ Hecho.** Evaluador offline (`scripts/evaluate.py`)
+que reproduce el score oficial por nivel reutilizando la fórmula de
+`arc_agi.scorecard`. `Policy` refactorizado para backends intercambiables.
+Entregable medido: score del baseline aleatorio en los 25 juegos públicos =
+**0.00**.
 
-**Fase 1 — Generador procedural.** Ruta crítica. Entregable: N juegos
-sintéticos con diversidad medible de mecánicas.
+**Fase 1 — Generador procedural. ✅ Hecho** (ver `docs/procedural.md` para el
+diseño completo). Motor determinístico propio (`procedural/`, no LLM por
+ahora) con 12 mecánicas primarias (9 direccionales + 3 por click) y 3
+modificadores de peligro opcionales, validadas por un solver BFS antes de
+aceptarlas. Entregable medido: 200 juegos generados, las 12 mecánicas
+usadas, 34 combinaciones (mecánica × peligro) distintas, 139
+direccionales / 61 por click, todos verificados jugables tanto por el
+loader real de `arc_agi` como por `agent/my_agent.py` sin ningún cambio ni
+caso especial.
 
-**Fase 2 — Arquitectura del modelo.** Encoder de slots + modelo secuencial;
-resolver §4.4. Entregable: el modelo puede sobreajustar un solo juego
-(prueba de cordura de que la arquitectura aprende algo).
+**5 juegos públicos reservados para validación honesta (C7)**, nunca
+entrenados ni usados para diseñar el generador: `wa30`, `lf52`, `cd82`,
+`r11l`, `ka59` (se excluyó `ls20` del pool de reserva porque ya se usó para
+el sanity check de sobreajuste de Fase 2).
+
+**Fase 2 — Arquitectura del modelo. ✅ Hecho** (adelantada antes que Fase 1,
+a pedido explícito: la elección de arquitectura no dependía del generador).
+Encoder de slots + transformer causal; §4.4 resuelto. Entregable medido: el
+modelo sobreajusta un episodio grabado de `ls20` (loss 1.50 → 0.0001 en 500
+pasos, 100% de acciones reproducidas en modo determinista).
 
 **Fase 3 — Entrenamiento a escala** sobre la distribución de juegos.
 Entregable: score en los juegos held-out.

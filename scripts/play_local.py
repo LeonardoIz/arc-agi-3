@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -55,7 +56,13 @@ def main() -> None:
                    help="List available games and exit.")
     p.add_argument("--render", default=None, choices=[None, "terminal"],
                    help="Optional terminal rendering each step.")
+    p.add_argument("--record", action="store_true",
+                   help="Record each episode to recordings/<name>.<guid>.recording.jsonl "
+                        "(agents.recorder.Recorder), readable back by model.data.RecordingDataset.")
     args = p.parse_args()
+
+    if args.record:
+        os.environ.setdefault("RECORDINGS_DIR", str(ROOT / "recordings"))
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -102,7 +109,7 @@ def main() -> None:
             game_id=game_id,
             agent_name=f"MyAgent.local.{game_id}",
             ROOT_URL="http://localhost",
-            record=False,
+            record=args.record,
             arc_env=env,
             tags=["local-dev"],
         )

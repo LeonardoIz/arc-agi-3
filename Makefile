@@ -30,7 +30,7 @@ STEPS           ?= 200
 TORCH_INDEX     ?= https://download.pytorch.org/whl/cu129
 PIP_STAGE       ?= $(HOME)/.cache/arc-agi-3-pip-stage
 
-.PHONY: help setup play-local pull-sample notebook submit status verify-local list-games train clean _check-kaggle
+.PHONY: help setup play-local pull-sample notebook submit status verify-local list-games train evaluate clean _check-kaggle
 
 _check-kaggle:
 	@if [ ! -s .kaggle/access_token ]; then \
@@ -73,6 +73,9 @@ list-games: ## Show all available games
 
 train: ## Run the model training loop (see model/train.py; TRAIN_ARGS for extra flags)
 	$(VENV_PY) -m model.train $(TRAIN_ARGS)
+
+evaluate: ## Score agent/my_agent.py with the official formula (EVAL_ARGS for extra flags)
+	$(VENV_PY) scripts/evaluate.py $(if $(GAME),--game $(GAME)) --max-steps $(STEPS) $(EVAL_ARGS)
 
 pull-sample: _check-kaggle ## Download the official Stochastic Goose sample notebook for reference
 	mkdir -p reference/stochastic-goose
