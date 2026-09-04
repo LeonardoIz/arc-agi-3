@@ -19,6 +19,16 @@ FRAMEWORK_DIR   := vendor/ARC-AGI-3-Agents
 COMP_SLUG       := arc-prize-2026-arc-agi-3
 GAME            ?=
 STEPS           ?= 200
+# PyTorch is installed apart from the other deps for two reasons.
+# 1) It needs a CUDA-matched wheel index. Default targets CUDA 12.9, which
+#    covers Blackwell (sm_120). Override for CPU-only machines:
+#      make setup TORCH_INDEX=https://download.pytorch.org/whl/cpu
+# 2) Its wheels total ~3.5GB and pip stages them in TMPDIR before installing.
+#    Under WSL, /tmp is a 2GB RAM-backed tmpfs, so the install dies partway
+#    with ENOSPC — and pip misreports that as a network error. Stage on a real
+#    filesystem instead.
+TORCH_INDEX     ?= https://download.pytorch.org/whl/cu129
+PIP_STAGE       ?= $(HOME)/.cache/arc-agi-3-pip-stage
 
 .PHONY: help setup play-local pull-sample notebook submit status verify-local list-games train clean _check-kaggle
 
@@ -38,7 +48,9 @@ help:
 setup: ## One-time install: venv, arc-agi, kaggle CLI, torch, clone framework
 	$(PYTHON) -m venv $(VENV)
 	$(VENV_PIP) install --upgrade pip
-	$(VENV_PIP) install "arc-agi>=0.9.6" "kaggle>=2.2" python-dotenv pandas pyarrow torch
+	$(VENV_PIP) install "arc-agi>=0.9.6" "kaggle>=2.2" python-dotenv pandas pyarrow
+	@mkdir -p $(PIP_STAGE)
+	TMPDIR=$(PIP_STAGE) $(VENV_PIP) install --resume-retries 10 torch --index-url $(TORCH_INDEX)
 	@if [ ! -d "$(FRAMEWORK_DIR)/.git" ]; then \
 	    mkdir -p vendor && git clone --depth 1 $(FRAMEWORK_REPO) $(FRAMEWORK_DIR); \
 	else \

@@ -33,15 +33,6 @@ Seven files, each one concern:
 | `model/train.py` | Loss functions and the training CLI loop (`python -m model.train`). |
 | `model/__init__.py` | Re-exports the public surface. |
 
-This started as ~22 files (per-architecture backbone files, a
-plural `backbones/`/`heads/` registry, a `training/` subpackage) and was
-deliberately collapsed down to these seven once it became clear the extra
-indirection (a registry for architectures that didn't exist yet, a
-subpackage for four small training files) wasn't earning its cost. If you
-outgrow one of these files — e.g. you want to try multiple backbone
-architectures side by side — split it back out then, with a real second
-implementation to justify the seam.
-
 ## Data flow
 
 ```
