@@ -12,6 +12,11 @@ environment_files/
 recordings/
 logs.log
 
+# Trained model checkpoints (see model/training/train.py)
+checkpoints/
+*.pt
+*.pth
+
 # Generated artefacts
 notebooks/submission.ipynb
 reference/

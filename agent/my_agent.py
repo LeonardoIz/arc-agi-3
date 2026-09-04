@@ -16,9 +16,18 @@ Contract (enforced by the ARC-AGI-3-Agents framework):
   - Class must be named `MyAgent` (the notebook's __init__.py registers it).
   - Implement `is_done(frames, latest_frame) -> bool`.
   - Implement `choose_action(frames, latest_frame) -> GameAction`.
+
+Playing with a trained PyTorch model instead of the random baseline:
+  Set `MODEL_CHECKPOINT` below (or the `ARC_MODEL_CHECKPOINT` env var) to a
+  checkpoint produced by `model/train.py` (see `docs/model.md` for how the
+  model package is laid out and used). If the checkpoint can't be found or
+  loaded, this agent silently falls back to the random strategy below — so
+  it's always safe to leave `MODEL_CHECKPOINT` set. Model code lives
+  entirely under `model/` and is never touched from here.
 """
 from __future__ import annotations
 
+import os
 import random
 import time
 from typing import Any
@@ -29,6 +38,13 @@ from arcengine import FrameData, GameAction, GameState
 # the `agents` package is on sys.path, so this import resolves.
 from agents.agent import Agent
 
+try:
+    from model.inference import ModelPolicy
+except ImportError:
+    # torch (or the model/ package) isn't available in this environment —
+    # fall back to the random strategy below.
+    ModelPolicy = None  # type: ignore[assignment,misc]
+
 
 class MyAgent(Agent):
     """Picks legal actions uniformly at random. Replace with your strategy."""
@@ -36,12 +52,20 @@ class MyAgent(Agent):
     # Upper bound on actions per game; the framework also enforces global limits.
     MAX_ACTIONS = 80
 
+    # Path to a trained model checkpoint. Leave as None (or unset the env
+    # var) to always use the random baseline. See the module docstring.
+    MODEL_CHECKPOINT: str | None = os.environ.get("ARC_MODEL_CHECKPOINT")
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # Seed per game_id so replays from the same game are reproducible but
         # different games explore independently.
         seed = int(time.time() * 1_000_000) + hash(self.game_id) % 1_000_000
         random.seed(seed)
+
+        self._policy = None
+        if ModelPolicy is not None and self.MODEL_CHECKPOINT:
+            self._policy = ModelPolicy.try_from_checkpoint(self.MODEL_CHECKPOINT)
 
     @property
     def name(self) -> str:
@@ -57,6 +81,9 @@ class MyAgent(Agent):
         # First call or after a death → reset the level.
         if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
             return GameAction.RESET
+
+        if self._policy is not None:
+            return self._policy.act(frames, latest_frame)
 
         # ── Per-game strategy fork ───────────────────────────────────────────
         # By default every game uses the same uniformly-random strategy in the

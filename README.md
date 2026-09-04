@@ -196,13 +196,16 @@ Three reasons:
 .
 ├── agent/
 │   └── my_agent.py             ★ The file you edit
+├── model/                      PyTorch model package — see docs/model.md
 ├── scripts/
 │   ├── play_local.py           Runs your agent against real games
-│   ├── build_notebook.py       Packages your agent into a Kaggle notebook
+│   ├── build_notebook.py       Packages your agent (+ model/) into a Kaggle notebook
 │   └── slim_framework.py       Trims framework deps so install is light
 ├── notebooks/
 │   ├── kernel-metadata.json    Edit once: your Kaggle username
 │   └── submission.ipynb        Auto-generated, never edit by hand
+├── docs/
+│   └── model.md                 How model/ is laid out and how to use it
 ├── vendor/                     Cloned framework (gitignored)
 ├── .venv/                      Python 3.12 venv (gitignored)
 ├── .kaggle/                    Your project-local Kaggle token (gitignored)

@@ -40,8 +40,22 @@ _ACCELERATORS = {
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_SRC = ROOT / "agent" / "my_agent.py"
+MODEL_DIR = ROOT / "model"
 NOTEBOOK_PATH = ROOT / "notebooks" / "submission.ipynb"
 METADATA_PATH = ROOT / "notebooks" / "kernel-metadata.json"
+
+
+def collect_model_files() -> dict[str, str]:
+    """All `model/**/*.py` sources, relative path -> content. `my_agent.py`
+    does `from model.inference import ModelPolicy`, so this package has to
+    ride along in the notebook the same way `my_agent.py` itself does.
+    """
+    if not MODEL_DIR.exists():
+        return {}
+    return {
+        str(p.relative_to(MODEL_DIR)).replace("\\", "/"): p.read_text()
+        for p in sorted(MODEL_DIR.rglob("*.py"))
+    }
 
 
 def code_cell(source: str) -> dict:
@@ -77,6 +91,26 @@ def build() -> dict:
         "%%writefile /tmp/my_agent.py\n" + agent_body
     )
 
+    # Same reasoning for the `model/` package `my_agent.py` imports: write
+    # its full source tree to /tmp/model/ (not /kaggle/working/) via a plain
+    # Python cell — `%%writefile` doesn't reliably create the nested
+    # subdirectories under model/backbones/, model/heads/, etc.
+    model_files = collect_model_files()
+    write_model_cell = None
+    if model_files:
+        files_literal = ",\n".join(
+            f"    {relpath!r}: {content!r}" for relpath, content in model_files.items()
+        )
+        write_model_source = (
+            "from pathlib import Path\n\n"
+            "_MODEL_FILES = {\n" + files_literal + ",\n}\n"
+            "for _relpath, _src in _MODEL_FILES.items():\n"
+            "    _dest = Path('/tmp/model') / _relpath\n"
+            "    _dest.parent.mkdir(parents=True, exist_ok=True)\n"
+            "    _dest.write_text(_src)\n"
+        )
+        write_model_cell = code_cell(write_model_source)
+
     run_cell_source = dedent(
         """\
         import os
@@ -89,6 +123,10 @@ def build() -> dict:
             # Copy the framework into a writable location.
             !cp -r /kaggle/input/competitions/arc-prize-2026-arc-agi-3/ARC-AGI-3-Agents \\
                    /kaggle/working/ARC-AGI-3-Agents
+
+            # Make the `model/` package (agent/my_agent.py's PyTorch model,
+            # if it imports one) importable alongside main.py.
+            !test -d /tmp/model && cp -r /tmp/model /kaggle/working/ARC-AGI-3-Agents/model || true
 
             # Drop our agent in as a framework template.
             !cp /tmp/my_agent.py \\
@@ -190,6 +228,7 @@ def build() -> dict:
             ),
             install_cell,
             write_agent_cell,
+            *([write_model_cell] if write_model_cell is not None else []),
             run_cell,
             dummy_submission_cell,
         ],

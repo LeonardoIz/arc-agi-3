@@ -7,7 +7,7 @@
 #   make submit       # build notebook from agent/my_agent.py + push to Kaggle
 #   make status       # tail the latest Kaggle run
 
-PYTHON          ?= python3.12
+PYTHON          ?= python3
 VENV            := .venv
 VENV_PY         := $(VENV)/bin/python
 VENV_PIP        := $(VENV)/bin/pip
@@ -20,7 +20,7 @@ COMP_SLUG       := arc-prize-2026-arc-agi-3
 GAME            ?=
 STEPS           ?= 200
 
-.PHONY: help setup play-local pull-sample notebook submit status verify-local clean _check-kaggle
+.PHONY: help setup play-local pull-sample notebook submit status verify-local list-games train clean _check-kaggle
 
 _check-kaggle:
 	@if [ ! -s .kaggle/access_token ]; then \
@@ -35,10 +35,10 @@ help:
 	@echo ""
 	@echo "Vars: PYTHON=$(PYTHON)  GAME=$(GAME)  STEPS=$(STEPS)"
 
-setup: ## One-time install: venv, arc-agi, kaggle CLI, clone framework
+setup: ## One-time install: venv, arc-agi, kaggle CLI, torch, clone framework
 	$(PYTHON) -m venv $(VENV)
 	$(VENV_PIP) install --upgrade pip
-	$(VENV_PIP) install "arc-agi>=0.9.6" "kaggle>=2.2" python-dotenv pandas pyarrow
+	$(VENV_PIP) install "arc-agi>=0.9.6" "kaggle>=2.2" python-dotenv pandas pyarrow torch
 	@if [ ! -d "$(FRAMEWORK_DIR)/.git" ]; then \
 	    mkdir -p vendor && git clone --depth 1 $(FRAMEWORK_REPO) $(FRAMEWORK_DIR); \
 	else \
@@ -58,6 +58,9 @@ verify-local: ## Quick smoke test: 50 steps on ls20 + vc33 only
 
 list-games: ## Show all available games
 	$(VENV_PY) scripts/play_local.py --list
+
+train: ## Run the model training loop (see model/train.py; TRAIN_ARGS for extra flags)
+	$(VENV_PY) -m model.train $(TRAIN_ARGS)
 
 pull-sample: _check-kaggle ## Download the official Stochastic Goose sample notebook for reference
 	mkdir -p reference/stochastic-goose
