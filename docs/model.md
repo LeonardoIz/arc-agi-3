@@ -5,6 +5,12 @@ from the agent framework. Nothing here is trained yet — this document
 covers what's built, why it's shaped this way, and how to use it once you
 implement the architecture.
 
+> **Nota:** este documento describe el scaffold **tal como está hoy**.
+> `docs/design.md` fija el contrato del proyecto y la arquitectura acordada,
+> y supersede parte de lo de acá — en particular `network.py`, que pasa de
+> CNN sobre un frame único a encoder de slots + modelo secuencial sobre el
+> episodio. Ver §4.3 de ese documento para qué sobrevive y qué se rehace.
+
 ## Why a separate package
 
 `agent/my_agent.py` is the one file the competition's dev loop expects you
